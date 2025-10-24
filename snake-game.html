@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>贪吃蛇游戏</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: white;
+        }
+
+        .game-container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+        }
+
+        h1 {
+            margin-bottom: 20px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .score-board {
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        #gameCanvas {
+            background-color: #0f0f0f;
+            border: 3px solid #4caf50;
+            border-radius: 8px;
+        }
+
+        .controls {
+            margin-top: 15px;
+        }
+
+        .controls button {
+            background: #4caf50;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .controls button:hover {
+            background: #45a049;
+        }
+
+        .controls button:active {
+            background: #3d8b40;
+        }
+
+        .status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 1.1em;
+        }
+
+        .status.winning {
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid #4caf50;
+        }
+
+        .status.losing {
+            background: rgba(244, 67, 54, 0.2);
+            border: 1px solid #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1>🐍 贪吃蛇游戏 🐍</h1>
+        
+        <div class="score-board">
+            <div>分数: <span id="score">0</span></div>
+            <div>最佳分数: <span id="bestScore">0</span></div>
+        </div>
+
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+
+        <div class="controls">
+            <button onclick="startGame()">开始游戏</button>
+            <button onclick="pauseGame()">暂停游戏</button>
+            <button onclick="resetGame()">重新开始</button>
+        </div>
+
+        <div class="status" id="gameStatus">
+            点击"开始游戏"来开始！
+        </div>
+    </div>
+
+    <script>
+        // 游戏配置
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const box = 20; // 每个方块的大小
+        let score = 0;
+        let bestScore = 0;
+        let d;
+        let food;
+        let snake;
+        let gameInterval;
+        let isPaused = false;
+        let gameOver = false;
+
+        // 初始化游戏
+        function initGame() {
+            snake = [];
+            snake[0] = { x: 9 * box, y: 10 * box };
+
+            // 初始方向
+            d = { x: 1, y: 0 };
+
+            // 生成食物
+            generateFood();
+
+            // 重置分数
+            score = 0;
+            document.getElementById('score').textContent = score;
+
+            // 恢复游戏状态
+            isPaused = false;
+            gameOver = false;
+            document.getElementById('gameStatus').textContent = '游戏进行中...';
+            document.getElementById('gameStatus').className = 'status';
+
+            // 开始游戏循环
+            gameInterval = setInterval(drawGame, 300);
+        }
+
+        // 生成食物
+        function generateFood() {
+            food = {
+                x: Math.floor(Math.random() * (canvas.width / box)) * box,
+                y: Math.floor(Math.random() * (canvas.height / box)) * box
+            };
+        }
+
+        // 绘制游戏
+        function drawGame() {
+            if (gameOver || isPaused) return;
+
+            // 清空画布
+            ctx.fillStyle = '#0f0f0f';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 绘制蛇
+            for (let i = 0; i < snake.length; i++) {
+                ctx.fillStyle = i === 0 ? '#ffcc00' : '#4caf50';
+                ctx.fillRect(snake[i].x, snake[i].y, box, box);
+            }
+
+            // 绘制食物
+            ctx.fillStyle = '#f44336';
+            ctx.fillRect(food.x, food.y, box, box);
+
+            // 蛇头位置
+            let snakeX = snake[0].x;
+            let snakeY = snake[0].y;
+
+            // 根据方向更新蛇头位置
+            if (d.x === 1) snakeX += box;
+            if (d.x === -1) snakeX -= box;
+            if (d.y === 1) snakeY += box;
+            if (d.y === -1) snakeY -= box;
+
+            // 检查游戏结束条件
+            if (snakeX < 0 || snakeX >= canvas.width || snakeY < 0 || snakeY >= canvas.height || checkCollision(snakeX, snakeY, snake)) {
+                endGame();
+                return;
+            }
+
+            // 检查是否吃到食物
+            if (snakeX === food.x && snakeY === food.y) {
+                score++;
+                document.getElementById('score').textContent = score;
+                generateFood();
+            } else {
+                // 移除蛇的尾部
+                snake.pop();
+            }
+
+            // 创建新的蛇头
+            let newHead = { x: snakeX, y: snakeY };
+            snake.unshift(newHead);
+        }
+
+        // 检查碰撞
+        function checkCollision(x, y, array) {
+            for (let i = 0; i < array.length; i++) {
+                if (array[i].x === x && array[i].y === y) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // 结束游戏
+        function endGame() {
+            clearInterval(gameInterval);
+            gameOver = true;
+            document.getElementById('gameStatus').textContent = '游戏结束！点击重新开始再来一局！';
+            document.getElementById('gameStatus').className = 'status losing';
+
+            // 更新最佳分数
+            if (score > bestScore) {
+                bestScore = score;
+                document.getElementById('bestScore').textContent = bestScore;
+            }
+        }
+
+        // 开始游戏
+        function startGame() {
+            if (!gameInterval) {
+                initGame();
+            }
+        }
+
+        // 暂停游戏
+        function pauseGame() {
+            if (gameInterval && !gameOver) {
+                isPaused = !isPaused;
+                document.getElementById('gameStatus').textContent = isPaused ? '游戏已暂停' : '游戏进行中...';
+                document.getElementById('gameStatus').className = 'status';
+            }
+        }
+
+        // 重新开始游戏
+        function resetGame() {
+            if (gameInterval) {
+                clearInterval(gameInterval);
+            }
+            initGame();
+        }
+
+        // 键盘控制
+        document.addEventListener('keydown', direction);
+
+        function direction(event) {
+            const key = event.key;
+            
+            // 箭头键或 WASD 键控制
+            if ((key === 'ArrowUp' || key === 'w' || key === 'W') && d.y !== 1) {
+                d = { x: 0, y: -1 };
+            } else if ((key === 'ArrowDown' || key === 's' || key === 'S') && d.y !== -1) {
+                d = { x: 0, y: 1 };
+            } else if ((key === 'ArrowLeft' || key === 'a' || key === 'A') && d.x !== 1) {
+                d = { x: -1, y: 0 };
+            } else if ((key === 'ArrowRight' || key === 'd' || key === 'D') && d.x !== -1) {
+                d = { x: 1, y: 0 };
+            }
+        }
+
+        // 页面加载完成后初始化最佳分数
+        document.addEventListener('DOMContentLoaded', function() {
+            // 从localStorage获取最佳分数
+            const savedBestScore = localStorage.getItem('snakeBestScore');
+            if (savedBestScore) {
+                bestScore = parseInt(savedBestScore);
+                document.getElementById('bestScore').textContent = bestScore;
+            }
+        });
+
+        // 保存最佳分数到localStorage
+        function saveBestScore() {
+            localStorage.setItem('snakeBestScore', bestScore.toString());
+        }
+
+        // 在endGame函数中添加保存最佳分数的调用
+        const originalEndGame = endGame;
+        endGame = function() {
+            originalEndGame();
+            saveBestScore();
+        };
+    </script>
+</body>
+</html>
