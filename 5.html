@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>To You: Sky Storybook</title>
+    <style>
+        body {
+            background: #020101; 
+            margin: 0;
+            overflow: hidden;
+            font-family: "Yu Mincho", "SimSun", "Songti SC", serif;
+        }
+        canvas { display: block; }
+        #letter-container {
+            position: absolute; top: 50%; left: 0; width: 100%;
+            transform: translateY(-50%); text-align: center;
+            pointer-events: none; z-index: 10;
+        }
+        #text-display {
+            color: rgba(255, 245, 220, 0.9); 
+            font-size: min(5vw, 28px); font-weight: 300;
+            letter-spacing: 0.4em; opacity: 0;
+            filter: blur(12px); transform: scale(0.95);
+            transition: all 3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            text-shadow: 0 0 10px rgba(255,255,255,0.2);
+        }
+        #text-display.visible { opacity: 1; filter: blur(0px); transform: scale(1); }
+        #start-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #020101; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; color: #777;
+            letter-spacing: 4px; cursor: pointer; transition: opacity 2s; z-index: 20;
+        }
+        .start-btn {
+            border-bottom: 1px solid #333; padding-bottom: 10px; transition: all 0.5s;
+        }
+        .start-btn:hover { color: #ffaaaa; border-color: #ffaaaa; }
+    </style>
+</head>
+<body>
+
+    <div id="start-overlay">
+        <div class="start-btn">点击开启 · 天空绘本</div>
+        <p style="font-size: 12px; margin-top: 20px; opacity: 0.4;">建议佩戴耳机 · 全屏观看</p>
+    </div>
+    <div id="letter-container"><div id="text-display"></div></div>
+    <canvas id="canvas"></canvas>
+
+<script>
+    // ==============================================
+    // 💌 你的信 (配合可爱的形状)
+    // ==============================================
+    const LETTER = [
+        "嘿，你看",
+        "我把天空变成了一本画册",
+        "这里有你喜欢的小兔子",
+        "有藏在云里的胡萝卜",
+        "还有月亮和星星",
+        "所有的童话",
+        "都为你绽放",
+        "愿你永远保持童心",
+        "永远可爱",
+        "❤"
+    ];
+    // ==============================================
+
+    const CONFIG = {
+        launchSpeed: 13,
+        gravity: 0.04,    // 重力稍微小一点，让形状保持久一点
+        friction: 0.95,   
+        trailLength: 0.08,
+        baseParticleCount: 400 
+    };
+
+    const random = (min, max) => Math.random() * (max - min) + min;
+
+    // ==============================================
+    // 🎨 图案生成算法 (核心)
+    // ==============================================
+    const ShapePatterns = {
+        // 1. ⭐ 星星 (Star)
+        star: (count) => {
+            const data = [];
+            const points = 5;
+            for (let i = 0; i < count; i++) {
+                const t = (i / count) * Math.PI * 2;
+                // 尖角逻辑
+                const r = (Math.floor(t / (Math.PI / points)) % 2 === 0) ? 12 : 5;
+                const scale = 1.2;
+                data.push({ vx: r * Math.cos(t) * scale, vy: r * Math.sin(t) * scale });
+            }
+            return data;
+        },
+
+        // 2. ❤ 心形 (Heart)
+        heart: (count) => {
+            const data = [];
+            const actualCount = count * 1.2;
+            for (let i = 0; i < actualCount; i++) {
+                const t = (i / actualCount) * Math.PI * 2;
+                const x = 16 * Math.pow(Math.sin(t), 3);
+                const y = -(13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t));
+                data.push({ vx: x * 0.6, vy: y * 0.6 });
+            }
+            return data;
+        },
+
+        // 3. 🌙 月亮 (Moon)
+        moon: (count) => {
+            const data = [];
+            for (let i = 0; i < count; i++) {
+                // 画一个大圆弧
+                const angle = random(0.5, 5.8); // 不闭合
+                const x = Math.cos(angle) * 10;
+                const y = Math.sin(angle) * 10;
+                // 只保留月牙部分（通过距离剔除）
+                data.push({ vx: x, vy: y });
+                // 补充内部填充，让月牙更厚实
+                if (i % 3 === 0) {
+                    data.push({ vx: x * 0.9 + 1, vy: y * 0.9 }); 
+                }
+            }
+            return data;
+        },
+
+        // 4. 🌹 玫瑰 (Rose Curve)
+        rose: (count) => {
+            const data = [];
+            const k = 4; // 4瓣玫瑰
+            for (let i = 0; i < count; i++) {
+                const theta = (i / count) * Math.PI * 2;
+                const r = 10 * Math.cos(k * theta);
+                data.push({ vx: r * Math.cos(theta), vy: r * Math.sin(theta) });
+            }
+            return data;
+        },
+
+        // 5. 🥕 胡萝卜 (Carrot)
+        carrot: (count) => {
+            const data = [];
+            // 胡萝卜身体：倒三角/圆锥
+            for (let i = 0; i < count * 0.8; i++) {
+                const y = random(0, 15); // 高度
+                const width = (15 - y) / 2.5; // 下面窄上面宽
+                const x = random(-width, width);
+                data.push({ vx: x, vy: y - 5, colorHue: 30 }); // 橙色主体偏移
+            }
+            // 胡萝卜叶子
+            for (let i = 0; i < count * 0.2; i++) {
+                const angle = random(Math.PI + 0.5, Math.PI * 2 - 0.5);
+                const r = random(2, 6);
+                data.push({ 
+                    vx: Math.cos(angle) * r, 
+                    vy: Math.sin(angle) * r - 6, // 放在头顶
+                    colorHue: 120 // 绿色
+                }); 
+            }
+            return data;
+        },
+
+        // 6. 🐰 小兔子 (Rabbit)
+        rabbit: (count) => {
+            const data = [];
+            // 头 (圆)
+            for (let i = 0; i < count * 0.5; i++) {
+                const angle = random(0, Math.PI * 2);
+                const r = random(0, 6);
+                data.push({ vx: Math.cos(angle) * r, vy: Math.sin(angle) * r });
+            }
+            // 耳朵 (两个长椭圆)
+            const drawEar = (offsetX, angleOffset) => {
+                for (let i = 0; i < count * 0.25; i++) {
+                    const t = random(0, Math.PI * 2);
+                    // 椭圆方程
+                    let x = 2 * Math.cos(t);
+                    let y = 6 * Math.sin(t);
+                    // 旋转
+                    const rot = angleOffset;
+                    const rx = x * Math.cos(rot) - y * Math.sin(rot);
+                    const ry = x * Math.sin(rot) + y * Math.cos(rot);
+                    data.push({ vx: rx + offsetX, vy: ry - 7 }); // 放在头顶两侧
+                }
+            };
+            drawEar(-3, -0.2); // 左耳
+            drawEar(3, 0.2);   // 右耳
+            return data;
+        },
+
+        // 7. 🐱 猫咪 (Cat) - AI补充
+        cat: (count) => {
+            const data = [];
+            // 脸
+            for (let i = 0; i < count * 0.6; i++) {
+                const a = random(0, Math.PI*2);
+                const r = random(5, 7);
+                data.push({vx: Math.cos(a)*r, vy: Math.sin(a)*r + 2});
+            }
+            // 耳朵 (三角形)
+            const addTri = (ox, oy) => {
+                for(let i=0; i<count * 0.15; i++) {
+                    const w = random(-2, 2);
+                    const h = random(0, -4);
+                    data.push({vx: w + ox, vy: h + oy});
+                }
+            }
+            addTri(-5, -2);
+            addTri(5, -2);
+            return data;
+        },
+
+        // 8. 🦋 蝴蝶 (Butterfly) - AI补充
+        butterfly: (count) => {
+            const data = [];
+            for (let i = 0; i < count; i++) {
+                const t = (i / count) * Math.PI * 12; // 多圈以填充
+                // 蝴蝶曲线方程
+                const r = Math.exp(Math.cos(t)) - 2*Math.cos(4*t) - Math.pow(Math.sin(t/12), 5);
+                const scale = 3;
+                data.push({
+                    vx: Math.sin(t) * r * scale,
+                    vy: -Math.cos(t) * r * scale // 修正方向
+                });
+            }
+            return data;
+        },
+
+        // 9. 🙂 笑脸 (Smiley) - AI补充
+        smiley: (count) => {
+            const data = [];
+            // 脸轮廓
+            for (let i = 0; i < count * 0.6; i++) {
+                const a = (i/(count*0.6)) * Math.PI * 2;
+                data.push({vx: Math.cos(a)*10, vy: Math.sin(a)*10});
+            }
+            // 眼睛
+            for (let i = 0; i < 20; i++) {
+                data.push({vx: -3 + random(-1,1), vy: -3 + random(-1,1)}); // 左眼
+                data.push({vx: 3 + random(-1,1), vy: -3 + random(-1,1)});  // 右眼
+            }
+            // 嘴巴 (下半圆)
+            for (let i = 0; i < count * 0.2; i++) {
+                const a = random(0.5, 2.6); // 弧度范围
+                data.push({vx: Math.cos(a)*6, vy: Math.sin(a)*6 + 1});
+            }
+            return data;
+        }
+    };
+
+
+    const AudioSys = {
+        ctx: null,
+        init() { try { const AC = window.AudioContext || window.webkitAudioContext; this.ctx = new AC(); this.ctx.resume(); } catch(e){} },
+        playLaunch() {
+            if (!this.ctx) return;
+            const t = this.ctx.currentTime; const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+            osc.frequency.setValueAtTime(150, t); osc.frequency.exponentialRampToValueAtTime(500, t + 2);
+            gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0, t + 2);
+            osc.connect(gain).connect(this.ctx.destination); osc.start(); osc.stop(t + 2.5);
+        },
+        playExplosion() {
+            if (!this.ctx) return;
+            const t = this.ctx.currentTime;
+            const bufferSize = this.ctx.sampleRate * 2.0; 
+            const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) data[i] = (Math.random()*2-1) * Math.pow(1 - i/bufferSize, 3);
+            const noise = this.ctx.createBufferSource(); noise.buffer = buffer;
+            const filter = this.ctx.createBiquadFilter(); filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(600, t); filter.frequency.exponentialRampToValueAtTime(100, t + 1.5);
+            const gain = this.ctx.createGain(); gain.gain.setValueAtTime(1.0, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 2);
+            noise.connect(filter).connect(gain).connect(this.ctx.destination); noise.start();
+        }
+    };
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let w, h, scaleFactor = 1; 
+    let particles = []; let rockets = [];
+    function resize() { w = canvas.width = window.innerWidth; h = canvas.height = window.innerHeight; scaleFactor = Math.min(w, 1200) / 1200; }
+    window.addEventListener('resize', resize); resize();
+
+    // --- 粒子类 ---
+    class Particle {
+        constructor(x, y, baseHue, vx, vy, customHue) {
+            this.x = x; this.y = y;
+            this.lx = x; this.ly = y;
+            this.vx = vx * scaleFactor;
+            this.vy = vy * scaleFactor;
+            
+            // 如果图案指定了特殊颜色(如胡萝卜叶子)，用特殊颜色，否则用烟花主色
+            this.hue = customHue !== undefined ? customHue : baseHue + random(-10, 10);
+            
+            this.brightness = random(60, 95);
+            this.alpha = 1;
+            this.decay = random(0.005, 0.01); // 衰减适中，形状清晰
+            this.lineWidth = random(1.2, 2.5);
+        }
+
+        update() {
+            this.lx = this.x; this.ly = this.y;
+            this.vx *= CONFIG.friction;
+            this.vy *= CONFIG.friction;
+            this.vy += CONFIG.gravity; 
+            // 保持形状：扰动极小
+            this.vx += random(-0.02, 0.02);
+            this.vy += random(-0.02, 0.02);
+            this.x += this.vx; this.y += this.vy;
+            this.alpha -= this.decay;
+        }
+
+        draw(ctx) {
+            ctx.beginPath(); ctx.moveTo(this.lx, this.ly); ctx.lineTo(this.x, this.y);
+            let currentHue = this.hue; if (this.alpha < 0.3) currentHue = 0;
+            const color = `hsla(${currentHue}, 100%, ${this.brightness}%, ${this.alpha})`;
+            ctx.strokeStyle = color; ctx.lineWidth = this.lineWidth; ctx.lineCap = 'round'; ctx.stroke();
+        }
+    }
+
+    class Rocket {
+        constructor(targetY, callback) {
+            this.x = w / 2; this.y = h; this.targetY = targetY; this.vy = -CONFIG.launchSpeed;
+            this.callback = callback; this.trail = []; AudioSys.playLaunch();
+        }
+        update() {
+            this.x += random(-0.5, 0.5); this.y += this.vy; this.vy *= 0.98;
+            this.trail.push({x: this.x, y: this.y}); if(this.trail.length > 12) this.trail.shift();
+            if (this.vy > -1 || this.y <= this.targetY) { this.callback(this.x, this.y); return false; }
+            return true;
+        }
+        draw(ctx) {
+            ctx.beginPath(); for(let i=0; i<this.trail.length-1; i++) { ctx.moveTo(this.trail[i].x, this.trail[i].y); ctx.lineTo(this.trail[i+1].x, this.trail[i+1].y); }
+            ctx.strokeStyle = `rgba(255, 220, 150, 0.8)`; ctx.lineWidth = 2; ctx.stroke();
+        }
+    }
+
+    let letterIndex = 0; let isPlaying = false;
+    function startShow() {
+        if(isPlaying) return; isPlaying = true;
+        const ov = document.getElementById('start-overlay'); ov.style.opacity = 0;
+        setTimeout(() => ov.remove(), 2000);
+        AudioSys.init(); setTimeout(nextSequence, 1000);
+    }
+    function nextSequence() {
+        if (letterIndex >= LETTER.length) { setInterval(launchRandom, 3500); return; }
+        rockets.push(new Rocket(h * 0.25, (x, y) => {
+            explode(x, y); showText(LETTER[letterIndex]); letterIndex++;
+            setTimeout(nextSequence, 7000);
+        }));
+    }
+    function launchRandom() { rockets.push(new Rocket(h * random(0.2, 0.4), (x, y) => explode(x, y))); }
+
+    // --- 爆炸控制 ---
+    function explode(x, y) {
+        AudioSys.playExplosion();
+        const baseHue = random(0, 360);
+        
+        // 随机选择一个形状
+        const shapeNames = Object.keys(ShapePatterns);
+        const chosenShape = shapeNames[Math.floor(random(0, shapeNames.length))];
+        const particleData = ShapePatterns[chosenShape](CONFIG.baseParticleCount);
+
+        particleData.forEach(data => {
+            // 如果形状函数返回了 colorHue，则使用它（例如胡萝卜的橙色和绿色）
+            // 否则使用烟花本次的基础颜色
+            particles.push(new Particle(x, y, baseHue, data.vx, data.vy, data.colorHue));
+        });
+    }
+
+    const textEl = document.getElementById('text-display');
+    function showText(text) {
+        textEl.classList.remove('visible');
+        setTimeout(() => { textEl.innerText = text; textEl.classList.add('visible'); }, 1500);
+        setTimeout(() => { textEl.classList.remove('visible'); }, 6000);
+    }
+
+    function loop() {
+        requestAnimationFrame(loop);
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = `rgba(0, 0, 0, ${CONFIG.trailLength})`; ctx.fillRect(0, 0, w, h);
+        ctx.globalCompositeOperation = 'lighter';
+        for(let i=rockets.length-1; i>=0; i--) { rockets[i].draw(ctx); if (!rockets[i].update()) rockets.splice(i, 1); }
+        for(let i=particles.length-1; i>=0; i--) { particles[i].draw(ctx); particles[i].update(); if(particles[i].alpha <= 0) particles.splice(i, 1); }
+    }
+    document.getElementById('start-overlay').addEventListener('click', startShow); loop();
+</script>
+</body>
+</html>
