@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>HTML5 打砖块游戏</title>
+    <style>
+        /* 简单的 CSS样式，让游戏居中并设置背景 */
+        body {
+            background-color: #222; /* 深灰色背景 */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            font-family: 'Arial', sans-serif;
+            color: white;
+        }
+        
+        h2 { margin-bottom: 10px; }
+        p { color: #aaa; font-size: 14px; margin-bottom: 20px; }
+
+        canvas {
+            background: #000; /* 游戏区域背景为黑色 */
+            border: 4px solid #0095DD; /* 蓝色边框 */
+            border-radius: 5px;
+            box-shadow: 0 0 20px rgba(0, 149, 221, 0.5);
+            cursor: none; /* 在游戏区域隐藏鼠标 */
+        }
+    </style>
+</head>
+<body>
+
+    <h2>🚀 经典打砖块 (Breakout)</h2>
+    <p>使用 <b>左右方向键</b> 或 <b>鼠标</b> 控制挡板</p>
+
+    <canvas id="myCanvas" width="480" height="320"></canvas>
+
+    <script>
+        // --- 1. 游戏初始化设置 ---
+        const canvas = document.getElementById("myCanvas");
+        const ctx = canvas.getContext("2d");
+
+        // 定义球的属性
+        let x = canvas.width / 2;
+        let y = canvas.height - 30;
+        let dx = 2;  // 水平速度
+        let dy = -2; // 垂直速度
+        const ballRadius = 10;
+
+        // 定义挡板属性
+        const paddleHeight = 10;
+        const paddleWidth = 75;
+        let paddleX = (canvas.width - paddleWidth) / 2;
+
+        // 按键状态
+        let rightPressed = false;
+        let leftPressed = false;
+
+        // 砖块设置
+        const brickRowCount = 3;
+        const brickColumnCount = 5;
+        const brickWidth = 75;
+        const brickHeight = 20;
+        const brickPadding = 10;
+        const brickOffsetTop = 30;
+        const brickOffsetLeft = 30;
+
+        // 游戏状态
+        let score = 0;
+        let lives = 3;
+
+        // 创建砖块数组
+        const bricks = [];
+        for (let c = 0; c < brickColumnCount; c++) {
+            bricks[c] = [];
+            for (let r = 0; r < brickRowCount; r++) {
+                // status: 1 代表砖块存在, 0 代表被打碎
+                bricks[c][r] = { x: 0, y: 0, status: 1 };
+            }
+        }
+
+        // --- 2. 事件监听 (键盘与鼠标) ---
+        document.addEventListener("keydown", keyDownHandler, false);
+        document.addEventListener("keyup", keyUpHandler, false);
+        document.addEventListener("mousemove", mouseMoveHandler, false);
+
+        function keyDownHandler(e) {
+            if (e.key === "Right" || e.key === "ArrowRight") {
+                rightPressed = true;
+            } else if (e.key === "Left" || e.key === "ArrowLeft") {
+                leftPressed = true;
+            }
+        }
+
+        function keyUpHandler(e) {
+            if (e.key === "Right" || e.key === "ArrowRight") {
+                rightPressed = false;
+            } else if (e.key === "Left" || e.key === "ArrowLeft") {
+                leftPressed = false;
+            }
+        }
+
+        function mouseMoveHandler(e) {
+            const relativeX = e.clientX - canvas.offsetLeft;
+            if (relativeX > 0 && relativeX < canvas.width) {
+                paddleX = relativeX - paddleWidth / 2;
+            }
+        }
+
+        // --- 3. 核心逻辑功能 ---
+
+        // 碰撞检测：球打砖块
+        function collisionDetection() {
+            for (let c = 0; c < brickColumnCount; c++) {
+                for (let r = 0; r < brickRowCount; r++) {
+                    const b = bricks[c][r];
+                    if (b.status === 1) {
+                        if (x > b.x && x < b.x + brickWidth && y > b.y && y < b.y + brickHeight) {
+                            dy = -dy; // 球反弹
+                            b.status = 0; // 砖块消失
+                            score += 10;
+                            
+                            // 胜利判定
+                            if (score === brickRowCount * brickColumnCount * 10) {
+                                alert("🎉 恭喜你！你赢了！\n总分: " + score);
+                                document.location.reload();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- 4. 绘制函数 (每一帧画什么) ---
+
+        function drawBall() {
+            ctx.beginPath();
+            ctx.arc(x, y, ballRadius, 0, Math.PI * 2);
+            ctx.fillStyle = "#0095DD";
+            ctx.fill();
+            ctx.closePath();
+        }
+
+        function drawPaddle() {
+            ctx.beginPath();
+            ctx.rect(paddleX, canvas.height - paddleHeight, paddleWidth, paddleHeight);
+            ctx.fillStyle = "#0095DD";
+            ctx.fill();
+            ctx.closePath();
+        }
+
+        function drawBricks() {
+            for (let c = 0; c < brickColumnCount; c++) {
+                for (let r = 0; r < brickRowCount; r++) {
+                    if (bricks[c][r].status === 1) {
+                        const brickX = (c * (brickWidth + brickPadding)) + brickOffsetLeft;
+                        const brickY = (r * (brickHeight + brickPadding)) + brickOffsetTop;
+                        bricks[c][r].x = brickX;
+                        bricks[c][r].y = brickY;
+                        
+                        ctx.beginPath();
+                        ctx.rect(brickX, brickY, brickWidth, brickHeight);
+                        // 根据行数改变颜色，让画面不单调
+                        ctx.fillStyle = r === 0 ? "#e74c3c" : r === 1 ? "#f1c40f" : "#2ecc71";
+                        ctx.fill();
+                        ctx.closePath();
+                    }
+                }
+            }
+        }
+
+        function drawScore() {
+            ctx.font = "16px Arial";
+            ctx.fillStyle = "#FFFFFF";
+            ctx.fillText("分数: " + score, 8, 20);
+        }
+
+        function drawLives() {
+            ctx.font = "16px Arial";
+            ctx.fillStyle = "#FFFFFF";
+            ctx.fillText("生命: " + lives, canvas.width - 65, 20);
+        }
+
+        // --- 5. 主游戏循环 ---
+        function draw() {
+            // 清空画布
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawBricks();
+            drawBall();
+            drawPaddle();
+            drawScore();
+            drawLives();
+            collisionDetection();
+
+            // 墙壁碰撞检测 (左右)
+            if (x + dx > canvas.width - ballRadius || x + dx < ballRadius) {
+                dx = -dx;
+            }
+            
+            // 墙壁碰撞检测 (上方)
+            if (y + dy < ballRadius) {
+                dy = -dy;
+            } else if (y + dy > canvas.height - ballRadius) {
+                // 撞击底部：检测是否落在挡板上
+                if (x > paddleX && x < paddleX + paddleWidth) {
+                    // 增加一点难度：根据击中挡板的位置稍微改变X速度
+                    // (简单的物理模拟)
+                    dy = -dy; 
+                    // 防止球速过快（如果你想加速可以在这里修改逻辑）
+                    dx = dx * 1.05; 
+                    dy = dy * 1.05; 
+                } else {
+                    // 未接住球，扣命
+                    lives--;
+                    if (!lives) {
+                        alert("💀 游戏结束\n你的分数: " + score);
+                        document.location.reload();
+                    } else {
+                        // 重置球和挡板位置，继续下一条命
+                        x = canvas.width / 2;
+                        y = canvas.height - 30;
+                        dx = 2;
+                        dy = -2;
+                        paddleX = (canvas.width - paddleWidth) / 2;
+                    }
+                }
+            }
+
+            // 更新挡板位置
+            if (rightPressed && paddleX < canvas.width - paddleWidth) {
+                paddleX += 7;
+            } else if (leftPressed && paddleX > 0) {
+                paddleX -= 7;
+            }
+
+            // 更新球位置
+            x += dx;
+            y += dy;
+
+            // 循环调用
+            requestAnimationFrame(draw);
+        }
+
+        // 开始游戏
+        draw();
+    </script>
+</body>
+</html>

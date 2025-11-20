@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>吃豆人 V2.0 - 智能幽灵版</title>
+    <style>
+        body {
+            background-color: #111;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+        }
+        h2 { margin: 10px 0; text-shadow: 0 0 10px #ffff00; }
+        .info { margin-bottom: 10px; color: #ccc; font-size: 14px; }
+        
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+        }
+        
+        canvas {
+            background-color: black;
+            border: 4px solid #2c3e50;
+            border-radius: 4px;
+            display: block;
+        }
+
+        #overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            display: none;
+            z-index: 10;
+        }
+        #overlay h1 { font-size: 40px; margin: 0 0 20px 0; }
+        #overlay button {
+            padding: 10px 20px;
+            font-size: 18px;
+            cursor: pointer;
+            background: #f1c40f;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        #overlay button:hover { background: #d4ac0d; }
+    </style>
+</head>
+<body>
+
+    <h2>🟡 吃豆人 V2.0 (智能版)</h2>
+    <div class="info">
+        分数: <span id="scoreEl" style="color:yellow; font-weight:bold;">0</span> 
+        | <span style="color:#ff4444">红鬼会追你</span> | <b>方向键</b> 移动
+    </div>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+        <div id="overlay">
+            <h1 id="statusText">游戏结束</h1>
+            <button onclick="resetGame()">再玩一次</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('scoreEl');
+        const overlay = document.getElementById('overlay');
+        const statusText = document.getElementById('statusText');
+
+        // --- 1. 游戏配置 ---
+        const TILE_SIZE = 20; 
+        const ROWS = 20;
+        const COLS = 20;
+        const SPEED = 2; // 必须能被 TILE_SIZE 整除
+
+        // 1=墙, 0=豆子, 2=空地, 9=吃豆人, 8=幽灵出生点
+        const rawMap = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+            [1,0,1,1,1,0,1,1,0,1,0,1,1,0,1,1,1,0,1],
+            [1,0,1,1,1,0,1,1,0,1,0,1,1,0,1,1,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,1,1,0,1,0,1,1,2,1,1,0,1,0,1,1,0,1],
+            [1,0,0,0,0,1,0,1,2,2,2,1,0,1,0,0,0,0,0,1],
+            [1,1,1,1,0,1,0,1,2,8,2,1,0,1,0,1,1,1,1],
+            [1,2,2,1,0,1,0,1,1,2,1,1,0,1,0,1,2,2,1], // 这里的2是地图外的装饰或空地
+            [1,1,1,1,0,1,0,2,2,8,2,2,0,1,0,1,1,1,1], // 中间稍微宽敞一点给鬼
+            [1,0,0,0,0,0,0,1,1,1,1,1,0,0,0,0,0,0,0,1],
+            [1,0,1,1,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1],
+            [1,0,1,1,0,1,0,1,1,1,1,1,0,1,0,1,1,0,1],
+            [1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+            [1,1,1,1,1,1,0,1,0,1,0,1,0,1,1,1,1,1,1],
+            [1,0,0,0,0,0,0,1,0,9,0,1,0,0,0,0,0,0,0,1],
+            [1,0,1,1,1,1,0,1,0,1,0,1,0,1,1,1,1,0,1],
+            [1,0,1,1,1,1,0,0,0,0,0,0,0,1,1,1,1,0,1],
+            [1,0,0,0,0,0,0,1,1,1,1,1,0,0,0,0,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+
+        let walls = [];
+        let pellets = [];
+        let score = 0;
+        let gameRunning = false;
+        let animationId;
+        let mouthOpen = 0; 
+        let mouthSpeed = 0.15; 
+
+        // 角色对象 (坐标为左上角)
+        const pacman = { x:0, y:0, vx:0, vy:0, nextVx:0, nextVy:0, rotation:0 };
+        const ghosts = [];
+
+        // --- 2. 工具函数 ---
+        
+        // 判断某个网格坐标是否是墙壁
+        function isWall(col, row) {
+            // 边界检查
+            if (row < 0 || row >= ROWS || col < 0 || col >= COLS) return true;
+            // 在 rawMap 中，1 是墙
+            return rawMap[row][col] === 1;
+        }
+
+        // 获取角色当前所在的网格坐标
+        function getGridPos(actor) {
+            return {
+                col: Math.round(actor.x / TILE_SIZE),
+                row: Math.round(actor.y / TILE_SIZE)
+            };
+        }
+
+        // --- 3. 初始化 ---
+
+        function initGame() {
+            score = 0;
+            scoreEl.innerText = score;
+            walls = [];
+            pellets = [];
+            ghosts.length = 0;
+
+            // 解析地图
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const val = rawMap[r][c];
+                    const posX = c * TILE_SIZE;
+                    const posY = r * TILE_SIZE;
+
+                    if (val === 1) {
+                        walls.push({ x: posX, y: posY });
+                    } else if (val === 0) {
+                        pellets.push({ x: posX + TILE_SIZE/2, y: posY + TILE_SIZE/2 });
+                    } else if (val === 9) {
+                        pacman.x = posX; pacman.y = posY;
+                        pacman.vx = 0; pacman.vy = 0;
+                        pacman.nextVx = 0; pacman.nextVy = 0;
+                        pacman.rotation = 0;
+                    } else if (val === 8) {
+                        // 收集出生点，稍后分配给鬼
+                    }
+                }
+            }
+
+            // 初始化三个幽灵
+            // 红色：追击者
+            ghosts.push(createGhost(9, 7, 'red', 'chaser'));
+            // 粉色：随机游荡
+            ghosts.push(createGhost(9, 9, 'pink', 'random')); 
+            // 青色：随机游荡
+            ghosts.push(createGhost(10, 9, 'cyan', 'random'));
+
+            gameRunning = true;
+            overlay.style.display = 'none';
+            animate();
+        }
+
+        function createGhost(col, row, color, type) {
+            return {
+                x: col * TILE_SIZE,
+                y: row * TILE_SIZE,
+                vx: 0,
+                vy: 0,
+                color: color,
+                type: type,
+                speed: SPEED
+            };
+        }
+
+        // --- 4. 控制 ---
+        window.addEventListener('keydown', (e) => {
+            if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+                e.preventDefault(); // 防止滚动页面
+            }
+            switch(e.key) {
+                case 'ArrowUp':    pacman.nextVx = 0; pacman.nextVy = -SPEED; break;
+                case 'ArrowDown':  pacman.nextVx = 0; pacman.nextVy = SPEED; break;
+                case 'ArrowLeft':  pacman.nextVx = -SPEED; pacman.nextVy = 0; break;
+                case 'ArrowRight': pacman.nextVx = SPEED; pacman.nextVy = 0; break;
+            }
+        });
+
+        // --- 5. 游戏主循环 ---
+        function animate() {
+            if (!gameRunning) return;
+            animationId = requestAnimationFrame(animate);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // --- 绘制墙壁 ---
+            ctx.fillStyle = '#1919A6';
+            walls.forEach(w => ctx.fillRect(w.x, w.y, TILE_SIZE, TILE_SIZE));
+
+            // --- 绘制豆子 ---
+            ctx.fillStyle = '#feb';
+            pellets.forEach(p => {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
+                ctx.fill();
+            });
+
+            // --- 吃豆人逻辑 ---
+            movePacman();
+            drawPacman();
+
+            // --- 幽灵逻辑 ---
+            ghosts.forEach(g => {
+                moveGhost(g);
+                drawGhost(g);
+                
+                // 碰撞检测 (距离判断)
+                const dist = Math.hypot((g.x - pacman.x), (g.y - pacman.y));
+                if (dist < TILE_SIZE - 5) {
+                    gameOver(false);
+                }
+            });
+
+            // 吃豆子
+            // 简单碰撞：当 Pacman 中心点接近豆子中心点
+            const pacCx = pacman.x + TILE_SIZE/2;
+            const pacCy = pacman.y + TILE_SIZE/2;
+            for (let i = pellets.length - 1; i >= 0; i--) {
+                const p = pellets[i];
+                const dist = Math.hypot(p.x - pacCx, p.y - pacCy);
+                if (dist < 8) { // 吃到豆子
+                    pellets.splice(i, 1);
+                    score += 10;
+                    scoreEl.innerText = score;
+                }
+            }
+
+            if (pellets.length === 0) gameOver(true);
+        }
+
+        // --- 6. 移动逻辑 (核心改进) ---
+
+        function movePacman() {
+            // 只有在完全对齐网格时，才允许改变方向
+            // 这样可以防止“卡墙”
+            if (pacman.x % TILE_SIZE === 0 && pacman.y % TILE_SIZE === 0) {
+                const col = pacman.x / TILE_SIZE;
+                const row = pacman.y / TILE_SIZE;
+
+                // 检查"预选方向"是否可行
+                let nextCol = col;
+                let nextRow = row;
+                if (pacman.nextVx > 0) nextCol++;
+                if (pacman.nextVx < 0) nextCol--;
+                if (pacman.nextVy > 0) nextRow++;
+                if (pacman.nextVy < 0) nextRow--;
+
+                if (!isWall(nextCol, nextRow)) {
+                    pacman.vx = pacman.nextVx;
+                    pacman.vy = pacman.nextVy;
+                    // 更新旋转角度
+                    if(pacman.vx > 0) pacman.rotation = 0;
+                    if(pacman.vx < 0) pacman.rotation = Math.PI;
+                    if(pacman.vy < 0) pacman.rotation = -Math.PI/2;
+                    if(pacman.vy > 0) pacman.rotation = Math.PI/2;
+                } 
+                
+                // 检查"当前方向"前方是否有墙（如果是，停止移动）
+                nextCol = col;
+                nextRow = row;
+                if (pacman.vx > 0) nextCol++;
+                if (pacman.vx < 0) nextCol--;
+                if (pacman.vy > 0) nextRow++;
+                if (pacman.vy < 0) nextRow--;
+
+                if (isWall(nextCol, nextRow)) {
+                    pacman.vx = 0;
+                    pacman.vy = 0;
+                }
+            }
+
+            pacman.x += pacman.vx;
+            pacman.y += pacman.vy;
+        }
+
+        function moveGhost(ghost) {
+            // 幽灵 AI 决策：只有在刚好到达格子中心时才做决策
+            if (ghost.x % TILE_SIZE === 0 && ghost.y % TILE_SIZE === 0) {
+                const col = ghost.x / TILE_SIZE;
+                const row = ghost.y / TILE_SIZE;
+
+                // 1. 找出所有可行的方向
+                const directions = [
+                    { vx: 0, vy: -SPEED, name: 'UP' },
+                    { vx: 0, vy: SPEED, name: 'DOWN' },
+                    { vx: -SPEED, vy: 0, name: 'LEFT' },
+                    { vx: SPEED, vy: 0, name: 'RIGHT' }
+                ];
+
+                const validMoves = directions.filter(dir => {
+                    // 不走墙壁
+                    const nextC = col + (dir.vx / SPEED);
+                    const nextR = row + (dir.vy / SPEED);
+                    if (isWall(nextC, nextR)) return false;
+
+                    // 尽量不走回头路 (除非是死胡同)
+                    // 如果当前有速度，且这个新方向是反方向，先标记
+                    if (ghost.vx !== 0 || ghost.vy !== 0) {
+                        if (dir.vx === -ghost.vx && dir.vy === -ghost.vy) {
+                            // 只有在没有其他路可选时，才允许回头
+                            // 我们稍后处理，这里先暂时允许，但在选择逻辑里降低优先级
+                            return true; 
+                        }
+                    }
+                    return true;
+                });
+
+                // 如果没有路走（应该不会发生，除非卡死），就停下
+                if (validMoves.length === 0) return;
+
+                // 剔除回头路 (如果有多于1条路可选)
+                let bestMoves = validMoves;
+                if (validMoves.length > 1 && (ghost.vx !== 0 || ghost.vy !== 0)) {
+                    bestMoves = validMoves.filter(dir => !(dir.vx === -ghost.vx && dir.vy === -ghost.vy));
+                }
+
+                // 2. 根据性格选择方向
+                let chosenDir;
+
+                if (ghost.type === 'chaser') {
+                    // [红色幽灵]：选择离吃豆人最近的那个格子
+                    // 这是一个简单的寻路算法
+                    let minDistance = 999999;
+                    bestMoves.forEach(move => {
+                        const targetCol = col + (move.vx / SPEED);
+                        const targetRow = row + (move.vy / SPEED);
+                        
+                        // 计算到 Pacman 的距离
+                        const pacCol = Math.round(pacman.x / TILE_SIZE);
+                        const pacRow = Math.round(pacman.y / TILE_SIZE);
+                        
+                        // 使用勾股定理计算距离
+                        const dist = Math.pow(targetCol - pacCol, 2) + Math.pow(targetRow - pacRow, 2);
+                        
+                        if (dist < minDistance) {
+                            minDistance = dist;
+                            chosenDir = move;
+                        }
+                    });
+                } else {
+                    // [随机幽灵]：从可行路径里随机选一条
+                    chosenDir = bestMoves[Math.floor(Math.random() * bestMoves.length)];
+                }
+
+                // 应用选择
+                if (chosenDir) {
+                    ghost.vx = chosenDir.vx;
+                    ghost.vy = chosenDir.vy;
+                }
+            }
+
+            ghost.x += ghost.vx;
+            ghost.y += ghost.vy;
+        }
+
+        function drawPacman() {
+            ctx.save();
+            // 移动画布原点到吃豆人中心，方便旋转
+            ctx.translate(pacman.x + TILE_SIZE/2, pacman.y + TILE_SIZE/2);
+            ctx.rotate(pacman.rotation);
+            
+            // 嘴巴动画
+            if (mouthOpen > 0.5 || mouthOpen < 0) mouthSpeed = -mouthSpeed;
+            mouthOpen += mouthSpeed * 0.5;
+            const currentMouth = (pacman.vx===0 && pacman.vy===0) ? 0.2 : Math.abs(mouthOpen);
+
+            ctx.beginPath();
+            ctx.arc(0, 0, 9, currentMouth, Math.PI * 2 - currentMouth);
+            ctx.lineTo(0, 0);
+            ctx.fillStyle = '#ffe135';
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawGhost(g) {
+            const cx = g.x + TILE_SIZE/2;
+            const cy = g.y + TILE_SIZE/2;
+            
+            ctx.beginPath();
+            // 头部圆弧
+            ctx.arc(cx, cy - 2, 9, Math.PI, 0); 
+            // 底部波浪线
+            ctx.lineTo(cx + 9, cy + 9);
+            ctx.lineTo(cx + 4, cy + 7);
+            ctx.lineTo(cx - 4, cy + 9);
+            ctx.lineTo(cx - 9, cy + 7);
+            ctx.lineTo(cx - 9, cy);
+            ctx.fillStyle = g.color;
+            ctx.fill();
+            
+            // 眼睛
+            ctx.fillStyle = 'white';
+            ctx.beginPath(); ctx.arc(cx - 4, cy - 2, 3, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(cx + 4, cy - 2, 3, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = 'black';
+            ctx.beginPath(); ctx.arc(cx - 4, cy - 2, 1.5, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(cx + 4, cy - 2, 1.5, 0, Math.PI*2); ctx.fill();
+        }
+
+        function gameOver(win) {
+            gameRunning = false;
+            cancelAnimationFrame(animationId);
+            statusText.innerText = win ? "🎉 胜利！" : "💀 游戏结束";
+            statusText.style.color = win ? "#2ecc71" : "#e74c3c";
+            overlay.style.display = 'flex';
+        }
+
+        function resetGame() {
+            initGame();
+        }
+
+        initGame();
+
+    </script>
+</body>
+</html>
